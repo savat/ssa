@@ -1,128 +1,62 @@
-name: Build tun2socks for Android
+name: Build tun2socks Android
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Build version'
-        required: false
-        default: 'latest'
-
-permissions:
-  contents: write
-  actions: write
-  checks: write
+  push:
+    branches: [ main ]
 
 jobs:
-  build-android:
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        target:
-          - { name: "armeabi-v7a", goarch: "arm", goarm: "7", cc: "armv7a-linux-androideabi21-clang" }
-          - { name: "arm64-v8a", goarch: "arm64", goarm: "", cc: "aarch64-linux-android21-clang" }
-          - { name: "x86", goarch: "386", goarm: "", cc: "i686-linux-android21-clang" }
-          - { name: "x86_64", goarch: "amd64", goarm: "", cc: "x86_64-linux-android21-clang" }
-    
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      GO_VERSION: "1.21"
+      NDK_VERSION: "r26d"
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        submodules: recursive
-    
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-        cache: true
-    
-    - name: Setup Android NDK
-      uses: android-actions/setup-android@v3
-      with:
-        ndk-version: '25.2.9519653'
-    
-    - name: Configure environment
-      run: |
-        echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> $GITHUB_ENV
-        echo "CC=$ANDROID_SDK_ROOT/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.target.cc }}" >> $GITHUB_ENV
-        echo "BINARY_NAME=tun2socks-${{ matrix.target.name }}" >> $GITHUB_ENV
-    
-    - name: Build tun2socks
-      run: |
-        # Clone tun2socks repository ถ้ายังไม่มี
-        if [ ! -d "tun2socks" ]; then
-          git clone https://github.com/xjasonlyu/tun2socks.git
-        fi
-        
-        cd tun2socks
-        
-        # Build
-        GOOS=android \
-        GOARCH=${{ matrix.target.goarch }} \
-        GOARM=${{ matrix.target.goarm }} \
-        CGO_ENABLED=1 \
-        CC=${{ env.CC }} \
-        CGO_CFLAGS="-D__ANDROID_API__=21" \
-        go build \
-          -ldflags="-s -w -buildid=" \
-          -trimpath \
-          -o "../${{ env.BINARY_NAME }}" \
-          ./main.go
-        
-        cd ..
-        
-        # Strip binary
-        ${{ env.CC }}-strip --strip-all "${{ env.BINARY_NAME }}"
-        
-        # Check file
-        file "${{ env.BINARY_NAME }}"
-        ls -lh "${{ env.BINARY_NAME }}"
-    
-    - name: Upload binary artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: tun2socks-${{ matrix.target.name }}
-        path: ${{ env.BINARY_NAME }}
-        retention-days: 7
-        if-no-files-found: error
-    
-  release:
-    needs: build-android
-    runs-on: ubuntu-22.04
-    if: startsWith(github.ref, 'refs/tags/v')
-    
-    steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-    
-    - name: List downloaded files
-      run: |
-        find . -type f -name "tun2socks-*" | xargs file
-        find . -type f -name "tun2socks-*" -exec ls -lh {} \;
-    
-    - name: Create release archive
-      run: |
-        mkdir -p release/bin
-        # รวมไฟล์ทั้งหมดในโฟลเดอร์เดียว
-        find . -name "tun2socks-*" -type f -exec cp {} release/bin/ \;
-        cd release
-        zip -r tun2socks-android.zip bin/
-        ls -lh
-        
-        # สร้าง checksum
-        sha256sum tun2socks-android.zip > tun2socks-android.zip.sha256
-    
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          release/tun2socks-android.zip
-          release/tun2socks-android.zip.sha256
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y wget unzip
+
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download Android NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+          unzip android-ndk-${NDK_VERSION}-linux.zip
+          mv android-ndk-${NDK_VERSION} $HOME/ndk
+
+      - name: Setup gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          export ANDROID_NDK_HOME=$HOME/ndk
+          gomobile init
+
+      - name: Clone tun2socks source
+        run: |
+          git clone https://github.com/xjasonlyu/tun2socks src
+
+      - name: Build Android Libraries
+        run: |
+          export ANDROID_NDK_HOME=$HOME/ndk
+          cd src/cmd/tun2socks
+          mkdir -p output
+
+          gomobile build -target=android/arm64 -o output/tun2socks-arm64.so
+          gomobile build -target=android/arm -o output/tun2socks-arm.so
+          gomobile build -target=android/amd64 -o output/tun2socks-amd64.so
+          gomobile build -target=android/386 -o output/tun2socks-x86.so
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tun2socks-android-libs
+          path: src/cmd/tun2socks/output/*.so
