@@ -1,6 +1,79 @@
-- name: Clone fixed badvpn
-  run: |
-    # ใช้ fork ที่มีการแก้ไข CMake
-    git clone https://github.com/x1unix/badvpn.git
-    cd badvpn
-    git checkout android-build
+name: Build tun2socks (ARM64)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git cmake ninja-build clang make gcc g++ pkg-config
+
+    - name: Setup Android NDK
+      run: |
+        # ติดตั้ง Android NDK version ที่เข้ากันได้
+        wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip android-ndk-r25c-linux.zip
+        echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
+        echo "NDK_ROOT=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
+
+    - name: Clone badvpn
+      run: |
+        git clone https://github.com/ambrop72/badvpn
+        cd badvpn
+        # ใช้ commit ที่เสถียร
+        git checkout 8a2f1c6e42e3b76e0b8e6f4f5a4e4c5d6e7f8a9b
+
+    - name: Fix CMake typo
+      run: |
+        cd badvpn
+        # แก้ typo ใน CMakeLists.txt
+        sed -i 's/set_target_propeies/set_target_properties/g' CMakeLists.txt
+        
+        # ลบ library ที่ไม่จำเป็นสำหรับ Android
+        for file in $(find . -name "CMakeLists.txt"); do
+          sed -i 's/target_link_libraries(.* rt .*)/target_link_libraries(\1)/g' "$file"
+          sed -i 's/target_link_libraries(.* pthread .*)/target_link_libraries(\1)/g' "$file"
+          sed -i 's/\bRT\b//g' "$file"
+          sed -i 's/\bPTHREAD\b//g' "$file"
+        done
+
+    - name: Build with simplified configuration
+      run: |
+        cd badvpn
+        rm -rf build
+        mkdir build
+        cd build
+        
+        # ใช้ configuration ที่ง่ายกว่า
+        cmake .. \
+          -DBUILD_NOTHING_BY_DEFAULT=1 \
+          -DBUILD_TUN2SOCKS=1 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" \
+          -DCMAKE_CXX_COMPILER="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" \
+          -DCMAKE_SYSROOT="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot" \
+          -DCMAKE_EXE_LINKER_FLAGS="-pie" \
+          -DCMAKE_SHARED_LINKER_FLAGS="-pie"
+        
+        make -j$(nproc)
+
+    - name: Prepare output
+      run: |
+        mkdir -p out
+        # ค้นหา tun2socks binary
+        find badvpn -name "tun2socks" -type f -exec cp {} out/ \; 2>/dev/null || true
+        find badvpn/build -name "*tun2socks*" -type f -exec cp {} out/ \; 2>/dev/null || true
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: tun2socks-arm64
+        path: out/
