@@ -16,48 +16,68 @@ jobs:
         sudo apt update
         sudo apt install -y git cmake ninja-build clang make gcc g++ pkg-config
 
+    - name: Setup Android NDK
+      run: |
+        # ติดตั้ง Android NDK
+        wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip android-ndk-r25c-linux.zip
+        echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
+        echo "ANDROID_NDK_ROOT=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
+
     - name: Clone badvpn
       run: |
         git clone https://github.com/ambrop72/badvpn
-        cd badvpn
 
-    - name: Patch badvpn (remove librt & pthread)
+    - name: Patch CMakeLists.txt
       run: |
         cd badvpn
-
-        # remove -lrt
-        grep -rl "\-lrt" . | xargs sed -i 's/-lrt//g'
-
-        # remove -lpthread
-        grep -rl "\-lpthread" . | xargs sed -i 's/-lpthread//g'
+        
+        # ลบ -lrt และ -lpthread จาก CMakeLists.txt
+        sed -i 's/target_link_libraries(badvpn-base rt pthread)/target_link_libraries(badvpn-base)/g' base/CMakeLists.txt
+        sed -i 's/target_link_libraries(badvpn-base rt pthread)//g' base/CMakeLists.txt
+        
+        # หรือถ้าต้องการแบบละเอียดมากขึ้น
+        for file in $(find . -name "CMakeLists.txt"); do
+          sed -i 's/-lrt//g' "$file"
+          sed -i 's/-lpthread//g' "$file"
+          sed -i 's/rt//g' "$file"
+          sed -i 's/pthread//g' "$file"
+        done
 
     - name: Build tun2socks (ARM64)
       run: |
         cd badvpn
-        mkdir build
+        mkdir -p build
         cd build
 
+        # ใช้ toolchain file ของ Android NDK
         cmake .. \
           -DBUILD_NOTHING_BY_DEFAULT=1 \
           -DBUILD_TUN2SOCKS=1 \
           -DBUILD_SHARED_LIBS=ON \
           -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_SYSTEM_NAME=Android \
-          -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-          -DCMAKE_ANDROID_NDK=$ANDROID_NDK_HOME \
-          -DCMAKE_ANDROID_STL_TYPE=c++_static \
-          -DCMAKE_ANDROID_API=21
+          -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+          -DANDROID_ABI=arm64-v8a \
+          -DANDROID_PLATFORM=android-21 \
+          -DANDROID_STL=c++_static
 
         make -j$(nproc)
 
+    - name: Check output
+      run: |
+        ls -la badvpn/build/tun2socks/ 2>/dev/null || true
+        find badvpn/build -name "*.so" -type f | xargs ls -la 2>/dev/null || true
+
     - name: Prepare output
       run: |
-        mkdir out
-        cp badvpn/build/libtun2socks.so out/
+        mkdir -p out
+        # ค้นหาไฟล์ output
+        find badvpn/build -name "*tun2socks*" -type f -exec cp {} out/ \; 2>/dev/null || true
+        find badvpn/build -name "*.so" -type f -exec cp {} out/ \; 2>/dev/null || true
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libtun2socks-arm64
-        path: out/libtun2socks.so
+        name: tun2socks-arm64
+        path: out/
