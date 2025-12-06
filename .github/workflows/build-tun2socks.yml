@@ -1,94 +1,34 @@
-name: Build tun2socks for Android
+name: Build with Docker
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # อนุญาตให้ manual trigger
+on: [workflow_dispatch]
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [armv7, arm64, x86, x86_64]
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+    
+    - name: Build using Docker
+      run: |
+        docker run --rm \
+          -v $(pwd):/src \
+          -w /src \
+          golang:1.21-alpine \
+          sh -c "
+          apk add --no-cache git clang lld
+          wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+          unzip android-ndk-r25b-linux.zip
+          export PATH=\$PWD/android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin:\$PATH
+          
+          # Build สำหรับ Android
+          GOOS=android GOARCH=arm64 CGO_ENABLED=1 \
+          CC=aarch64-linux-android21-clang \
+          go build -o tun2socks-android -trimpath -ldflags='-s -w' .
+          "
+    
+    - name: Upload Binary
+      uses: actions/upload-artifact@v4
       with:
-        submodules: recursive
-    
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
-    
-    - name: Set up Android NDK
-      uses: android-actions/setup-android@v2
-    
-    - name: Configure NDK toolchain
-      run: |
-        export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653
-        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-        echo "PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
-    
-    - name: Determine Go parameters
-      id: go_params
-      run: |
-        case ${{ matrix.target }} in
-          armv7)
-            echo "GOARCH=arm" >> $GITHUB_OUTPUT
-            echo "GOARM=7" >> $GITHUB_OUTPUT
-            echo "TARGET=aarch32-none-linux-androideabi21" >> $GITHUB_OUTPUT
-            echo "CC=armv7a-linux-androideabi21-clang" >> $GITHUB_OUTPUT
-            ;;
-          arm64)
-            echo "GOARCH=arm64" >> $GITHUB_OUTPUT
-            echo "GOARM=" >> $GITHUB_OUTPUT
-            echo "TARGET=aarch64-none-linux-android21" >> $GITHUB_OUTPUT
-            echo "CC=aarch64-linux-android21-clang" >> $GITHUB_OUTPUT
-            ;;
-          x86)
-            echo "GOARCH=386" >> $GITHUB_OUTPUT
-            echo "GOARM=" >> $GITHUB_OUTPUT
-            echo "TARGET=i686-none-linux-android21" >> $GITHUB_OUTPUT
-            echo "CC=i686-linux-android21-clang" >> $GITHUB_OUTPUT
-            ;;
-          x86_64)
-            echo "GOARCH=amd64" >> $GITHUB_OUTPUT
-            echo "GOARM=" >> $GITHUB_OUTPUT
-            echo "TARGET=x86_64-none-linux-android21" >> $GITHUB_OUTPUT
-            echo "CC=x86_64-linux-android21-clang" >> $GITHUB_OUTPUT
-            ;;
-        esac
-        echo "BINARY_NAME=tun2socks-${{ matrix.target }}" >> $GITHUB_OUTPUT
-    
-    - name: Build tun2socks
-      run: |
-        cd $GITHUB_WORKSPACE
-        GOOS=android \
-        GOARCH=${{ steps.go_params.outputs.GOARCH }} \
-        GOARM=${{ steps.go_params.outputs.GOARM }} \
-        CGO_ENABLED=1 \
-        CC=${{ steps.go_params.outputs.CC }} \
-        CGO_CFLAGS="-D__ANDROID_API__=21" \
-        go build \
-          -ldflags="-s -w -buildid=" \
-          -trimpath \
-          -o ${{ steps.go_params.outputs.BINARY_NAME }} \
-          ./main.go
-    
-    - name: Strip binary (optional)
-      run: |
-        ${{ steps.go_params.outputs.CCC }} \
-          --strip-all \
-          ${{ steps.go_params.outputs.BINARY_NAME }} \
-          -o ${{ steps.go_params.outputs.BINARY_NAME }}-stripped
-    
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: tun2socks-${{ matrix.target }}
-        path: ${{ steps.go_params.outputs.BINARY_NAME }}
+        name: tun2socks-android
+        path: tun2socks-android
