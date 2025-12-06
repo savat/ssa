@@ -1,6 +1,12 @@
 name: Build tun2socks for Android
 
-on: [workflow_dispatch]
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # อนุญาตให้ trigger เองได้
+
+permissions:
+  contents: write  # ต้องมี permission นี้สำหรับสร้าง release
 
 jobs:
   build:
@@ -9,54 +15,115 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Build binaries
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Set up Android NDK
       run: |
-        # ติดตั้ง Go
-        sudo apt-get update
-        sudo apt-get install -y golang-go
-        
-        # ดาวน์โหลด NDK
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
-        export NDK_HOME=$(pwd)/android-ndk-r25b
-        
-        # โคลน tun2socks
+        echo "NDK_HOME=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
+    
+    - name: Clone tun2socks
+      run: |
         git clone --depth 1 https://github.com/xjasonlyu/tun2socks.git
-        
-        # เข้าไปที่ directory
         cd tun2socks
         
-        # ตรวจสอบและ build
-        echo "Building tun2socks..."
+        # ตรวจสอบโครงสร้าง
+        echo "Project structure:"
+        find . -name "*.go" -type f | head -5
         
-        # Build ARM64
-        GOOS=android GOARCH=arm64 \
-        CGO_ENABLED=1 \
-        CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
-        go build -o ../tun2socks-arm64
-        
-        # Build ARMv7
-        GOOS=android GOARCH=arm \
-        CGO_ENABLED=1 \
-        CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang \
-        go build -o ../tun2socks-armv7
-        
-        cd ..
-        
-        # เปลี่ยนชื่อไฟล์
-        mv tun2socks-arm64 tun2socks-android-arm64
-        mv tun2socks-armv7 tun2socks-android-armv7
-        
-        # ตั้งค่า executable
-        chmod +x tun2socks-android-*
-        
-        echo "Build completed!"
-        ls -lh tun2socks-android-*
+        # ถ้าไม่เจอ main.go ใน cmd/tun2socks ลองดูว่า main.go อยู่ที่ไหน
+        if [ ! -f "cmd/tun2socks/main.go" ]; then
+          echo "Looking for main.go..."
+          find . -name "main.go" -type f
+        fi
     
-    - name: Upload binaries
-      uses: actions/upload-artifact@v4
+    - name: Build for Android ARM64
+      run: |
+        cd tun2socks
+        
+        # ลองหา main.go
+        if [ -f "main.go" ]; then
+          BUILD_PATH="."
+        elif [ -f "cmd/tun2socks/main.go" ]; then
+          BUILD_PATH="./cmd/tun2socks"
+        else
+          # หาไฟล์ main.go แรกที่เจอ
+          MAIN_GO=$(find . -name "main.go" -type f | head -1)
+          if [ -z "$MAIN_GO" ]; then
+            echo "ERROR: No main.go found!"
+            exit 1
+          fi
+          BUILD_PATH=$(dirname "$MAIN_GO")
+        fi
+        
+        echo "Building from: $BUILD_PATH"
+        
+        export GOOS=android
+        export GOARCH=arm64
+        export CGO_ENABLED=1
+        export CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+        
+        go build -o ../tun2socks-android-arm64 -trimpath -ldflags="-s -w" $BUILD_PATH
+        
+        # ตรวจสอบว่า build สำเร็จ
+        if [ ! -f "../tun2socks-android-arm64" ]; then
+          echo "ERROR: Build failed!"
+          exit 1
+        fi
+    
+    - name: Build for Android ARMv7
+      run: |
+        cd tun2socks
+        
+        # ลองหา main.go
+        if [ -f "main.go" ]; then
+          BUILD_PATH="."
+        elif [ -f "cmd/tun2socks/main.go" ]; then
+          BUILD_PATH="./cmd/tun2socks"
+        else
+          MAIN_GO=$(find . -name "main.go" -type f | head -1)
+          BUILD_PATH=$(dirname "$MAIN_GO")
+        fi
+        
+        export GOOS=android
+        export GOARCH=arm
+        export CGO_ENABLED=1
+        export CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
+        
+        go build -o ../tun2socks-android-armv7 -trimpath -ldflags="-s -w" $BUILD_PATH
+    
+    - name: Verify builds
+      run: |
+        echo "=== Build Verification ==="
+        echo "ARM64 binary:"
+        file tun2socks-android-arm64 || echo "Not found"
+        
+        echo -e "\nARMv7 binary:"
+        file tun2socks-android-armv7 || echo "Not found"
+        
+        echo -e "\nFile sizes:"
+        ls -lh tun2socks-android-* 2>/dev/null || echo "No files found"
+    
+    - name: Create Release
+      if: success()
+      uses: ncipollo/release-action@v1
       with:
-        name: tun2socks-android
-        path: |
-          tun2socks-android-arm64
-          tun2socks-android-armv7
+        artifacts: "tun2socks-android-arm64,tun2socks-android-armv7"
+        tag: "android-latest"
+        name: "Android Build"
+        body: |
+          tun2socks binaries for Android
+          
+          Files:
+          - **tun2socks-android-arm64**: For ARM64 devices
+          - **tun2socks-android-armv7**: For ARMv7 devices
+          
+          Usage in Android:
+          ```bash
+          ./tun2socks-android-arm64 -device tun://fd:123 -proxy socks5://127.0.0.1:1080
+          ```
+        token: ${{ secrets.GITHUB_TOKEN }}
