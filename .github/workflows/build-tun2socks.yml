@@ -3,7 +3,7 @@ name: Build tun2socks for Android
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # อนุญาตให้ trigger เองได้
+  workflow_dispatch:
 
 jobs:
   build:
@@ -19,46 +19,104 @@ jobs:
     
     - name: Set up Android NDK
       run: |
-        wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-        unzip android-ndk-r25b-linux.zip
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
         echo "NDK_HOME=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
     
     - name: Clone tun2socks
       run: |
-        git clone https://github.com/xjasonlyu/tun2socks
+        git clone --depth 1 https://github.com/xjasonlyu/tun2socks.git
         cd tun2socks
+        ls -la  # ดูโครงสร้างไฟล์
+    
+    - name: Check project structure
+      run: |
+        cd tun2socks
+        echo "Current directory: $(pwd)"
+        echo "Files in current directory:"
+        ls -la
+        echo "Checking for main.go files..."
+        find . -name "main.go" -type f | head -10
     
     - name: Build for Android ARM64
       run: |
         cd tun2socks
+        
+        # ตรวจสอบว่าไฟล์ main.go อยู่ที่ไหน
+        MAIN_GO_PATH="."
+        if [ -f "main.go" ]; then
+          echo "Found main.go in root directory"
+          MAIN_GO_PATH="."
+        elif [ -f "cmd/tun2socks/main.go" ]; then
+          echo "Found main.go in cmd/tun2socks/"
+          MAIN_GO_PATH="./cmd/tun2socks"
+        else
+          # หาไฟล์ main.go
+          MAIN_GO_FILE=$(find . -name "main.go" -type f | head -1)
+          if [ -n "$MAIN_GO_FILE" ]; then
+            MAIN_GO_PATH=$(dirname "$MAIN_GO_FILE")
+            echo "Found main.go at: $MAIN_GO_PATH"
+          else
+            echo "Error: No main.go found!"
+            exit 1
+          fi
+        fi
+        
+        echo "Building from: $MAIN_GO_PATH"
+        
         export GOOS=android
         export GOARCH=arm64
         export CGO_ENABLED=1
         export CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
-        go build -o ../tun2socks-android-arm64 -trimpath -ldflags="-s -w" ./cmd/tun2socks
+        
+        go build -o ../tun2socks-android-arm64 -trimpath -ldflags="-s -w" $MAIN_GO_PATH
     
     - name: Build for Android ARMv7
       run: |
         cd tun2socks
+        
+        # หา path ของ main.go อีกครั้ง
+        if [ -f "main.go" ]; then
+          MAIN_GO_PATH="."
+        elif [ -f "cmd/tun2socks/main.go" ]; then
+          MAIN_GO_PATH="./cmd/tun2socks"
+        else
+          MAIN_GO_FILE=$(find . -name "main.go" -type f | head -1)
+          MAIN_GO_PATH=$(dirname "$MAIN_GO_FILE")
+        fi
+        
         export GOOS=android
         export GOARCH=arm
         export CGO_ENABLED=1
         export CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
-        go build -o ../tun2socks-android-armv7 -trimpath -ldflags="-s -w" ./cmd/tun2socks
+        
+        go build -o ../tun2socks-android-armv7 -trimpath -ldflags="-s -w" $MAIN_GO_PATH
+    
+    - name: Verify builds
+      run: |
+        echo "Checking built files:"
+        file tun2socks-android-arm64 || echo "ARM64 build failed"
+        file tun2socks-android-armv7 || echo "ARMv7 build failed"
+        
+        echo "File sizes:"
+        ls -lh tun2socks-android-*
     
     - name: Create Release
       uses: softprops/action-gh-release@v1
+      if: success()
       with:
         files: |
           tun2socks-android-arm64
           tun2socks-android-armv7
-        tag_name: android-v1.0
-        name: Android Build
+        tag_name: android-$(date +%Y%m%d-%H%M%S)
+        name: Android Build $(date +%Y-%m-%d)
         body: |
-          tun2socks for Android
+          tun2socks binaries for Android
           
-          Files:
-          - tun2socks-android-arm64 (ARM64 devices)
-          - tun2socks-android-armv7 (ARMv7 devices)
+          Architecture:
+          - tun2socks-android-arm64: For ARM64 devices (most modern phones)
+          - tun2socks-android-armv7: For ARMv7 devices (older phones)
+          
+          Build date: $(date)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
