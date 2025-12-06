@@ -1,9 +1,6 @@
 name: Build tun2socks for Android
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+on: [workflow_dispatch]
 
 jobs:
   build:
@@ -12,111 +9,54 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-    
-    - name: Set up Android NDK
+    - name: Build binaries
       run: |
+        # ติดตั้ง Go
+        sudo apt-get update
+        sudo apt-get install -y golang-go
+        
+        # ดาวน์โหลด NDK
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
-        echo "NDK_HOME=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
-    
-    - name: Clone tun2socks
-      run: |
+        export NDK_HOME=$(pwd)/android-ndk-r25b
+        
+        # โคลน tun2socks
         git clone --depth 1 https://github.com/xjasonlyu/tun2socks.git
-        cd tun2socks
-        ls -la  # ดูโครงสร้างไฟล์
-    
-    - name: Check project structure
-      run: |
-        cd tun2socks
-        echo "Current directory: $(pwd)"
-        echo "Files in current directory:"
-        ls -la
-        echo "Checking for main.go files..."
-        find . -name "main.go" -type f | head -10
-    
-    - name: Build for Android ARM64
-      run: |
+        
+        # เข้าไปที่ directory
         cd tun2socks
         
-        # ตรวจสอบว่าไฟล์ main.go อยู่ที่ไหน
-        MAIN_GO_PATH="."
-        if [ -f "main.go" ]; then
-          echo "Found main.go in root directory"
-          MAIN_GO_PATH="."
-        elif [ -f "cmd/tun2socks/main.go" ]; then
-          echo "Found main.go in cmd/tun2socks/"
-          MAIN_GO_PATH="./cmd/tun2socks"
-        else
-          # หาไฟล์ main.go
-          MAIN_GO_FILE=$(find . -name "main.go" -type f | head -1)
-          if [ -n "$MAIN_GO_FILE" ]; then
-            MAIN_GO_PATH=$(dirname "$MAIN_GO_FILE")
-            echo "Found main.go at: $MAIN_GO_PATH"
-          else
-            echo "Error: No main.go found!"
-            exit 1
-          fi
-        fi
+        # ตรวจสอบและ build
+        echo "Building tun2socks..."
         
-        echo "Building from: $MAIN_GO_PATH"
+        # Build ARM64
+        GOOS=android GOARCH=arm64 \
+        CGO_ENABLED=1 \
+        CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
+        go build -o ../tun2socks-arm64
         
-        export GOOS=android
-        export GOARCH=arm64
-        export CGO_ENABLED=1
-        export CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+        # Build ARMv7
+        GOOS=android GOARCH=arm \
+        CGO_ENABLED=1 \
+        CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang \
+        go build -o ../tun2socks-armv7
         
-        go build -o ../tun2socks-android-arm64 -trimpath -ldflags="-s -w" $MAIN_GO_PATH
-    
-    - name: Build for Android ARMv7
-      run: |
-        cd tun2socks
+        cd ..
         
-        # หา path ของ main.go อีกครั้ง
-        if [ -f "main.go" ]; then
-          MAIN_GO_PATH="."
-        elif [ -f "cmd/tun2socks/main.go" ]; then
-          MAIN_GO_PATH="./cmd/tun2socks"
-        else
-          MAIN_GO_FILE=$(find . -name "main.go" -type f | head -1)
-          MAIN_GO_PATH=$(dirname "$MAIN_GO_FILE")
-        fi
+        # เปลี่ยนชื่อไฟล์
+        mv tun2socks-arm64 tun2socks-android-arm64
+        mv tun2socks-armv7 tun2socks-android-armv7
         
-        export GOOS=android
-        export GOARCH=arm
-        export CGO_ENABLED=1
-        export CC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
+        # ตั้งค่า executable
+        chmod +x tun2socks-android-*
         
-        go build -o ../tun2socks-android-armv7 -trimpath -ldflags="-s -w" $MAIN_GO_PATH
-    
-    - name: Verify builds
-      run: |
-        echo "Checking built files:"
-        file tun2socks-android-arm64 || echo "ARM64 build failed"
-        file tun2socks-android-armv7 || echo "ARMv7 build failed"
-        
-        echo "File sizes:"
+        echo "Build completed!"
         ls -lh tun2socks-android-*
     
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      if: success()
+    - name: Upload binaries
+      uses: actions/upload-artifact@v3
       with:
-        files: |
+        name: tun2socks-android
+        path: |
           tun2socks-android-arm64
           tun2socks-android-armv7
-        tag_name: android-$(date +%Y%m%d-%H%M%S)
-        name: Android Build $(date +%Y-%m-%d)
-        body: |
-          tun2socks binaries for Android
-          
-          Architecture:
-          - tun2socks-android-arm64: For ARM64 devices (most modern phones)
-          - tun2socks-android-armv7: For ARMv7 devices (older phones)
-          
-          Build date: $(date)
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
