@@ -2,8 +2,6 @@ name: Build tun2socks (ARM64)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -18,9 +16,20 @@ jobs:
         sudo apt update
         sudo apt install -y git cmake ninja-build clang make gcc g++ pkg-config
 
-    - name: Clone badvpn source
+    - name: Clone badvpn
       run: |
         git clone https://github.com/ambrop72/badvpn
+        cd badvpn
+
+    - name: Patch badvpn (remove librt & pthread)
+      run: |
+        cd badvpn
+
+        # remove -lrt
+        grep -rl "\-lrt" . | xargs sed -i 's/-lrt//g'
+
+        # remove -lpthread
+        grep -rl "\-lpthread" . | xargs sed -i 's/-lpthread//g'
 
     - name: Build tun2socks (ARM64)
       run: |
