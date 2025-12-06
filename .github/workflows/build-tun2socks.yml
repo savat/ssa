@@ -1,34 +1,128 @@
-name: Build with Docker
+name: Build tun2socks for Android
 
-on: [workflow_dispatch]
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version'
+        required: false
+        default: 'latest'
+
+permissions:
+  contents: write
+  actions: write
+  checks: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-android:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        target:
+          - { name: "armeabi-v7a", goarch: "arm", goarm: "7", cc: "armv7a-linux-androideabi21-clang" }
+          - { name: "arm64-v8a", goarch: "arm64", goarm: "", cc: "aarch64-linux-android21-clang" }
+          - { name: "x86", goarch: "386", goarm: "", cc: "i686-linux-android21-clang" }
+          - { name: "x86_64", goarch: "amd64", goarm: "", cc: "x86_64-linux-android21-clang" }
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        submodules: recursive
     
-    - name: Build using Docker
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        cache: true
+    
+    - name: Setup Android NDK
+      uses: android-actions/setup-android@v3
+      with:
+        ndk-version: '25.2.9519653'
+    
+    - name: Configure environment
       run: |
-        docker run --rm \
-          -v $(pwd):/src \
-          -w /src \
-          golang:1.21-alpine \
-          sh -c "
-          apk add --no-cache git clang lld
-          wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-          unzip android-ndk-r25b-linux.zip
-          export PATH=\$PWD/android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin:\$PATH
-          
-          # Build สำหรับ Android
-          GOOS=android GOARCH=arm64 CGO_ENABLED=1 \
-          CC=aarch64-linux-android21-clang \
-          go build -o tun2socks-android -trimpath -ldflags='-s -w' .
-          "
+        echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> $GITHUB_ENV
+        echo "CC=$ANDROID_SDK_ROOT/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.target.cc }}" >> $GITHUB_ENV
+        echo "BINARY_NAME=tun2socks-${{ matrix.target.name }}" >> $GITHUB_ENV
     
-    - name: Upload Binary
+    - name: Build tun2socks
+      run: |
+        # Clone tun2socks repository ถ้ายังไม่มี
+        if [ ! -d "tun2socks" ]; then
+          git clone https://github.com/xjasonlyu/tun2socks.git
+        fi
+        
+        cd tun2socks
+        
+        # Build
+        GOOS=android \
+        GOARCH=${{ matrix.target.goarch }} \
+        GOARM=${{ matrix.target.goarm }} \
+        CGO_ENABLED=1 \
+        CC=${{ env.CC }} \
+        CGO_CFLAGS="-D__ANDROID_API__=21" \
+        go build \
+          -ldflags="-s -w -buildid=" \
+          -trimpath \
+          -o "../${{ env.BINARY_NAME }}" \
+          ./main.go
+        
+        cd ..
+        
+        # Strip binary
+        ${{ env.CC }}-strip --strip-all "${{ env.BINARY_NAME }}"
+        
+        # Check file
+        file "${{ env.BINARY_NAME }}"
+        ls -lh "${{ env.BINARY_NAME }}"
+    
+    - name: Upload binary artifact
       uses: actions/upload-artifact@v4
       with:
-        name: tun2socks-android
-        path: tun2socks-android
+        name: tun2socks-${{ matrix.target.name }}
+        path: ${{ env.BINARY_NAME }}
+        retention-days: 7
+        if-no-files-found: error
+    
+  release:
+    needs: build-android
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: List downloaded files
+      run: |
+        find . -type f -name "tun2socks-*" | xargs file
+        find . -type f -name "tun2socks-*" -exec ls -lh {} \;
+    
+    - name: Create release archive
+      run: |
+        mkdir -p release/bin
+        # รวมไฟล์ทั้งหมดในโฟลเดอร์เดียว
+        find . -name "tun2socks-*" -type f -exec cp {} release/bin/ \;
+        cd release
+        zip -r tun2socks-android.zip bin/
+        ls -lh
+        
+        # สร้าง checksum
+        sha256sum tun2socks-android.zip > tun2socks-android.zip.sha256
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/tun2socks-android.zip
+          release/tun2socks-android.zip.sha256
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
