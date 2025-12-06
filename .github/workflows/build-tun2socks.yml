@@ -2,61 +2,52 @@ name: Build tun2socks Android
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      GO_VERSION: "1.21"
-      NDK_VERSION: "r26d"
-
     steps:
-      - name: Checkout repo
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y wget unzip
-
-      - name: Install Go
+      - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Download Android NDK
-        run: |
-          wget https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
-          unzip android-ndk-${NDK_VERSION}-linux.zip
-          mv android-ndk-${NDK_VERSION} $HOME/ndk
-
-      - name: Setup gomobile
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          export ANDROID_NDK_HOME=$HOME/ndk
-          gomobile init
+          go-version: "1.21"
 
       - name: Clone tun2socks source
         run: |
-          git clone https://github.com/xjasonlyu/tun2socks src
+          git clone https://github.com/xjasonlyu/tun2socks.git src
 
-      - name: Build Android Libraries
+      - name: Build Android libs
         run: |
-          export ANDROID_NDK_HOME=$HOME/ndk
-          cd src/cmd/tun2socks
+          cd src
+
           mkdir -p output
 
-          gomobile build -target=android/arm64 -o output/tun2socks-arm64.so
-          gomobile build -target=android/arm -o output/tun2socks-arm.so
-          gomobile build -target=android/amd64 -o output/tun2socks-amd64.so
-          gomobile build -target=android/386 -o output/tun2socks-x86.so
+          # ARM64
+          GOOS=android GOARCH=arm64 CGO_ENABLED=1 \
+            CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
+            go build -buildmode=c-shared -o output/tun2socks-arm64.so ./tun2socks
 
-      - name: Upload build artifacts
+          # ARMv7
+          GOOS=android GOARCH=arm CGO_ENABLED=1 \
+            CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
+            go build -buildmode=c-shared -o output/tun2socks-arm.so ./tun2socks
+
+          # x86_64
+          GOOS=android GOARCH=amd64 CGO_ENABLED=1 \
+            CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
+            go build -buildmode=c-shared -o output/tun2socks-amd64.so ./tun2socks
+
+          # x86
+          GOOS=android GOARCH=386 CGO_ENABLED=1 \
+            CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
+            go build -buildmode=c-shared -o output/tun2socks-x86.so ./tun2socks
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tun2socks-android-libs
-          path: src/cmd/tun2socks/output/*.so
+          name: tun2socks-libs
+          path: src/output/*.so
