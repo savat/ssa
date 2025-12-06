@@ -18,62 +18,99 @@ jobs:
 
     - name: Setup Android NDK
       run: |
-        # ติดตั้ง Android NDK version ที่เข้ากันได้
-        wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-        unzip android-ndk-r25c-linux.zip
-        echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
+        # ติดตั้ง Android NDK
+        wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip -q android-ndk-r25c-linux.zip
         echo "NDK_ROOT=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
 
     - name: Clone badvpn
       run: |
         git clone https://github.com/ambrop72/badvpn
         cd badvpn
-        # ใช้ commit ที่เสถียร
-        git checkout 8a2f1c6e42e3b76e0b8e6f4f5a4e4c5d6e7f8a9b
+        # ใช้ tag ล่าสุดหรือ branch master
+        git checkout master
 
-    - name: Fix CMake typo
+    - name: Fix CMake issues
       run: |
         cd badvpn
-        # แก้ typo ใน CMakeLists.txt
+        
+        # 1. แก้ typo set_target_propeies -> set_target_properties
         sed -i 's/set_target_propeies/set_target_properties/g' CMakeLists.txt
         
-        # ลบ library ที่ไม่จำเป็นสำหรับ Android
-        for file in $(find . -name "CMakeLists.txt"); do
-          sed -i 's/target_link_libraries(.* rt .*)/target_link_libraries(\1)/g' "$file"
-          sed -i 's/target_link_libraries(.* pthread .*)/target_link_libraries(\1)/g' "$file"
-          sed -i 's/\bRT\b//g' "$file"
-          sed -i 's/\bPTHREAD\b//g' "$file"
-        done
+        # 2. ลบ -lrt และ -lpthread สำหรับ Android
+        sed -i 's/target_link_libraries(badvpn-base rt pthread)/target_link_libraries(badvpn-base)/g' base/CMakeLists.txt
+        
+        # 3. สำหรับ Android ไม่ต้องการ librt
+        sed -i '/find_library.*RT_LIBRARY/d' CMakeLists.txt
+        sed -i '/RT_LIBRARY/d' CMakeLists.txt
+        
+        # 4. แก้ไขสำหรับ Android build
+        echo "Patching for Android build..."
+        cat >> base/CMakeLists.txt << 'EOF'
 
-    - name: Build with simplified configuration
+# Android specific fixes
+if(ANDROID)
+    # Android already includes pthread in libc
+    # No need for explicit linking
+    add_definitions(-DANDROID)
+endif()
+EOF
+
+    - name: Build for Android ARM64
       run: |
         cd badvpn
         rm -rf build
         mkdir build
         cd build
         
-        # ใช้ configuration ที่ง่ายกว่า
+        export CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+        export CXX="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
+        export AR="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+        export LD="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/ld"
+        export RANLIB="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
+        export STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+        
+        # ใช้ cross-compile อย่างง่าย
         cmake .. \
+          -DCMAKE_SYSTEM_NAME=Android \
+          -DCMAKE_SYSTEM_VERSION=21 \
+          -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+          -DCMAKE_ANDROID_NDK="$NDK_ROOT" \
+          -DCMAKE_ANDROID_STL_TYPE=c++_static \
+          -DCMAKE_BUILD_TYPE=Release \
           -DBUILD_NOTHING_BY_DEFAULT=1 \
           -DBUILD_TUN2SOCKS=1 \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" \
-          -DCMAKE_CXX_COMPILER="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" \
-          -DCMAKE_SYSROOT="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot" \
-          -DCMAKE_EXE_LINKER_FLAGS="-pie" \
-          -DCMAKE_SHARED_LINKER_FLAGS="-pie"
+          -DCMAKE_C_COMPILER="$CC" \
+          -DCMAKE_CXX_COMPILER="$CXX" \
+          -DCMAKE_FIND_ROOT_PATH="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot" \
+          -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+          -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+          -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
         
-        make -j$(nproc)
+        make -j$(nproc) tun2socks
+
+    - name: Check build results
+      run: |
+        cd badvpn/build
+        echo "Build directory contents:"
+        find . -type f -name "*tun2socks*" | xargs file 2>/dev/null || true
+        find . -type f -name "*.so" | xargs file 2>/dev/null || true
 
     - name: Prepare output
       run: |
         mkdir -p out
-        # ค้นหา tun2socks binary
-        find badvpn -name "tun2socks" -type f -exec cp {} out/ \; 2>/dev/null || true
+        # ค้นหาไฟล์ที่ build สำเร็จ
+        find badvpn -name "tun2socks" -type f -executable -exec cp {} out/ \; 2>/dev/null || true
         find badvpn/build -name "*tun2socks*" -type f -exec cp {} out/ \; 2>/dev/null || true
+        
+        if [ ! -f out/tun2socks ]; then
+          echo "Looking for shared libraries..."
+          find badvpn/build -name "*.so" -type f -exec cp {} out/ \; 2>/dev/null || true
+        fi
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: tun2socks-arm64
+        name: tun2socks-android-arm64
         path: out/
