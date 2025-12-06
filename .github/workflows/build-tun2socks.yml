@@ -11,7 +11,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -21,7 +21,6 @@ jobs:
     - name: Clone badvpn source
       run: |
         git clone https://github.com/ambrop72/badvpn
-        cd badvpn
 
     - name: Build tun2socks (ARM64)
       run: |
@@ -43,13 +42,13 @@ jobs:
 
         make -j$(nproc)
 
-    - name: Copy output
+    - name: Prepare output
       run: |
         mkdir out
         cp badvpn/build/libtun2socks.so out/
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: libtun2socks-arm64
         path: out/libtun2socks.so
