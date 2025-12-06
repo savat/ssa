@@ -1,116 +1,94 @@
-name: Build tun2socks (ARM64)
+name: Build tun2socks for Android
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # อนุญาตให้ manual trigger
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        target: [armv7, arm64, x86, x86_64]
+    
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git cmake ninja-build clang make gcc g++ pkg-config
-
-    - name: Setup Android NDK
-      run: |
-        # ติดตั้ง Android NDK
-        wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-        unzip -q android-ndk-r25c-linux.zip
-        echo "NDK_ROOT=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
-
-    - name: Clone badvpn
-      run: |
-        git clone https://github.com/ambrop72/badvpn
-        cd badvpn
-        # ใช้ tag ล่าสุดหรือ branch master
-        git checkout master
-
-    - name: Fix CMake issues
-      run: |
-        cd badvpn
-        
-        # 1. แก้ typo set_target_propeies -> set_target_properties
-        sed -i 's/set_target_propeies/set_target_properties/g' CMakeLists.txt
-        
-        # 2. ลบ -lrt และ -lpthread สำหรับ Android
-        sed -i 's/target_link_libraries(badvpn-base rt pthread)/target_link_libraries(badvpn-base)/g' base/CMakeLists.txt
-        
-        # 3. สำหรับ Android ไม่ต้องการ librt
-        sed -i '/find_library.*RT_LIBRARY/d' CMakeLists.txt
-        sed -i '/RT_LIBRARY/d' CMakeLists.txt
-        
-        # 4. แก้ไขสำหรับ Android build
-        echo "Patching for Android build..."
-        cat >> base/CMakeLists.txt << 'EOF'
-
-# Android specific fixes
-if(ANDROID)
-    # Android already includes pthread in libc
-    # No need for explicit linking
-    add_definitions(-DANDROID)
-endif()
-EOF
-
-    - name: Build for Android ARM64
-      run: |
-        cd badvpn
-        rm -rf build
-        mkdir build
-        cd build
-        
-        export CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
-        export CXX="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
-        export AR="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-        export LD="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/ld"
-        export RANLIB="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
-        export STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-        
-        # ใช้ cross-compile อย่างง่าย
-        cmake .. \
-          -DCMAKE_SYSTEM_NAME=Android \
-          -DCMAKE_SYSTEM_VERSION=21 \
-          -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-          -DCMAKE_ANDROID_NDK="$NDK_ROOT" \
-          -DCMAKE_ANDROID_STL_TYPE=c++_static \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DBUILD_NOTHING_BY_DEFAULT=1 \
-          -DBUILD_TUN2SOCKS=1 \
-          -DCMAKE_C_COMPILER="$CC" \
-          -DCMAKE_CXX_COMPILER="$CXX" \
-          -DCMAKE_FIND_ROOT_PATH="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot" \
-          -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-          -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-          -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
-        
-        make -j$(nproc) tun2socks
-
-    - name: Check build results
-      run: |
-        cd badvpn/build
-        echo "Build directory contents:"
-        find . -type f -name "*tun2socks*" | xargs file 2>/dev/null || true
-        find . -type f -name "*.so" | xargs file 2>/dev/null || true
-
-    - name: Prepare output
-      run: |
-        mkdir -p out
-        # ค้นหาไฟล์ที่ build สำเร็จ
-        find badvpn -name "tun2socks" -type f -executable -exec cp {} out/ \; 2>/dev/null || true
-        find badvpn/build -name "*tun2socks*" -type f -exec cp {} out/ \; 2>/dev/null || true
-        
-        if [ ! -f out/tun2socks ]; then
-          echo "Looking for shared libraries..."
-          find badvpn/build -name "*.so" -type f -exec cp {} out/ \; 2>/dev/null || true
-        fi
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3
       with:
-        name: tun2socks-android-arm64
-        path: out/
+        submodules: recursive
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.20'
+    
+    - name: Set up Android NDK
+      uses: android-actions/setup-android@v2
+    
+    - name: Configure NDK toolchain
+      run: |
+        export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
+    
+    - name: Determine Go parameters
+      id: go_params
+      run: |
+        case ${{ matrix.target }} in
+          armv7)
+            echo "GOARCH=arm" >> $GITHUB_OUTPUT
+            echo "GOARM=7" >> $GITHUB_OUTPUT
+            echo "TARGET=aarch32-none-linux-androideabi21" >> $GITHUB_OUTPUT
+            echo "CC=armv7a-linux-androideabi21-clang" >> $GITHUB_OUTPUT
+            ;;
+          arm64)
+            echo "GOARCH=arm64" >> $GITHUB_OUTPUT
+            echo "GOARM=" >> $GITHUB_OUTPUT
+            echo "TARGET=aarch64-none-linux-android21" >> $GITHUB_OUTPUT
+            echo "CC=aarch64-linux-android21-clang" >> $GITHUB_OUTPUT
+            ;;
+          x86)
+            echo "GOARCH=386" >> $GITHUB_OUTPUT
+            echo "GOARM=" >> $GITHUB_OUTPUT
+            echo "TARGET=i686-none-linux-android21" >> $GITHUB_OUTPUT
+            echo "CC=i686-linux-android21-clang" >> $GITHUB_OUTPUT
+            ;;
+          x86_64)
+            echo "GOARCH=amd64" >> $GITHUB_OUTPUT
+            echo "GOARM=" >> $GITHUB_OUTPUT
+            echo "TARGET=x86_64-none-linux-android21" >> $GITHUB_OUTPUT
+            echo "CC=x86_64-linux-android21-clang" >> $GITHUB_OUTPUT
+            ;;
+        esac
+        echo "BINARY_NAME=tun2socks-${{ matrix.target }}" >> $GITHUB_OUTPUT
+    
+    - name: Build tun2socks
+      run: |
+        cd $GITHUB_WORKSPACE
+        GOOS=android \
+        GOARCH=${{ steps.go_params.outputs.GOARCH }} \
+        GOARM=${{ steps.go_params.outputs.GOARM }} \
+        CGO_ENABLED=1 \
+        CC=${{ steps.go_params.outputs.CC }} \
+        CGO_CFLAGS="-D__ANDROID_API__=21" \
+        go build \
+          -ldflags="-s -w -buildid=" \
+          -trimpath \
+          -o ${{ steps.go_params.outputs.BINARY_NAME }} \
+          ./main.go
+    
+    - name: Strip binary (optional)
+      run: |
+        ${{ steps.go_params.outputs.CCC }} \
+          --strip-all \
+          ${{ steps.go_params.outputs.BINARY_NAME }} \
+          -o ${{ steps.go_params.outputs.BINARY_NAME }}-stripped
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: tun2socks-${{ matrix.target }}
+        path: ${{ steps.go_params.outputs.BINARY_NAME }}
