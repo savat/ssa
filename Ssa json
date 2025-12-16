@@ -3,3 +3,8 @@ vless://d6b93a3e-08b7-452d-8779-459c47770cee@103.169.67.58:8080?security=&encryp
 vless://fbdee0dd-487e-4894-8b2a-92c2b8abead6@116.204.181.186:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais3-ais
 vless://61dd62b4-8fb2-4a1e-84fe-670175d3c85f@116.204.183.176:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais4-ais
 vless://d2b43b2a-6e57-45d9-aa5f-a39d6081df11@103.169.67.254:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais5-ais
+vless://49f59f4b-d6cd-4d2d-9116-7074b1a84a2b@readyidc-ray-5.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
+vless://3b15b52a-b11f-4915-94df-b2757f9cbbd9@readyidc-ray-4.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
+vless://607eaf52-4dcc-48fc-ab38-7feb032d62e4@readyidc-ray-2.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
+vless://2d4ef4b1-992a-4b0b-8e1a-42a69a4a4249@readyidc-ray-1.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
+vless://7c3d75d5-6c56-44c2-bd5a-f716a8244b29@readyidc-ray-3.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
