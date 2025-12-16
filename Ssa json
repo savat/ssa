@@ -1,4 +1,5 @@
-vless://b2198a4c-372d-4ddc-91e6-28c30f564ca3@116.204.183.126:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais1-ais
+http
+//b2198a4c-372d-4ddc-91e6-28c30f564ca3@116.204.183.126:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais1-ais
 vless://d6b93a3e-08b7-452d-8779-459c47770cee@103.169.67.58:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais2-ais
 vless://fbdee0dd-487e-4894-8b2a-92c2b8abead6@116.204.181.186:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais3-ais
 vless://61dd62b4-8fb2-4a1e-84fe-670175d3c85f@116.204.183.176:8080?security=&encryption=none&host=www.speedtest.net&headerType=http&type=tcp#ais4-ais
@@ -8,3 +9,7 @@ vless://3b15b52a-b11f-4915-94df-b2757f9cbbd9@readyidc-ray-4.thaivpn.uk:8080?type
 vless://607eaf52-4dcc-48fc-ab38-7feb032d62e4@readyidc-ray-2.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
 vless://2d4ef4b1-992a-4b0b-8e1a-42a69a4a4249@readyidc-ray-1.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
 vless://7c3d75d5-6c56-44c2-bd5a-f716a8244b29@readyidc-ray-3.thaivpn.uk:8080?type=tcp&encryption=none&host=www.speedtest.net&headerType=http
+vless://a110004b-47c1-42e8-8219-e46b4d7366c3@auto.free4.thanwin.online:80?path=%2Fmovpn&security=none&encryption=none&host=cj-speedtest.ebb.my&type=ws#Admin-Ais3
+vless://a110004b-47c1-42e8-8219-e46b4d7366c3@auto.free3.thanwin.online:80?path=%2Fmovpn&security=none&encryption=none&host=cj-speedtest.ebb.my&type=ws#Admin-Ais3
+vless://a110004b-47c1-42e8-8219-e46b4d7366c3@auto.free2.thanwin.online:80?path=%2Fmovpn&security=none&encryption=none&host=cj-speedtest.ebb.my&type=ws#Admin-Ais%202
+vless://a110004b-47c1-42e8-8219-e46b4d7366c3@auto.free1.thanwin.online:80?path=%2Fmovpn&security=none&encryption=none&host=cj-speedtest.ebb.my&type=ws#Admin-Ais
